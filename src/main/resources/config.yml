@@ -1,0 +1,2 @@
+require_ground_material: true
+ground_material: GOLD_BLOCK

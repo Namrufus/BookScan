@@ -1,0 +1,14 @@
+# This is the .gitignore
+# It allows git to ignore things
+# <3
+
+# Directories
+.settings/
+.idea/
+lib/
+target/
+
+# Files
+*.iml
+.classpath
+.project
