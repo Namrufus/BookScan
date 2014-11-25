@@ -18,6 +18,7 @@ public class BookScan extends JavaPlugin implements Listener {
 	private class Config {
 		public final boolean REQUIRE_GROUND_MATERIAL;
 		public final Material GROUND_MATERIAL;
+		
 		public Config(ConfigurationSection config) {
 			REQUIRE_GROUND_MATERIAL = config.getBoolean("require_ground_material");
 			GROUND_MATERIAL = Material.getMaterial(config.getString("ground_material"));
@@ -47,55 +48,71 @@ public class BookScan extends JavaPlugin implements Listener {
 	// ----------------------------------------------------------------------------------------------------------------
 		
 	@EventHandler
-	public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {	
-		
-		// if a player is not the damager, then quit
+	public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
+		// determine if a player is hitting another player with a written book
+		// the player that is swinging the book is the searcher player
+		// the player that is hit by the book is the searched player
 		if (!(event.getDamager().getType() == EntityType.PLAYER)) return;
-		
 		Player searcherPlayer = (Player)event.getDamager();
 		
-		// if a player is no being damage, then quit
 		if (!(event.getEntityType() == EntityType.PLAYER)) return;
-		
 		Player searchedPlayer = (Player)event.getEntity();
 		
 		ItemStack itemStackInHand = searcherPlayer.getItemInHand();
+		if (itemStackInHand.getType() != Material.WRITTEN_BOOK) return;
 		
-		if (itemStackInHand.getType() == Material.WRITTEN_BOOK) {
-			// cancel the event so the searched player does not get hurt
-			event.setCancelled(true);
+		// cancel the event so the searched player does not get hurt
+		event.setCancelled(true);
+		
+		// only do anything if the player is standing on the required ground material
+		if (config.REQUIRE_GROUND_MATERIAL && getBlockMaterialStandingOn(searchedPlayer) != config.GROUND_MATERIAL) return;
+		
+		// loop through all lines in the book
+		List<String> lines = getAllLinesInBook((BookMeta) itemStackInHand.getItemMeta());
+		String searcherMessage = "";
+		int totalFoundItemTypes = 0;
+		String searchedMessage = "";
+		for (String line : lines) {
 			
-			getLogger().info("wah wah: " + getBlockMaterialStandingOn(searchedPlayer));
+			// clean the line and split the line by spaces
+			line = line.trim().toUpperCase();
+			String[] split = line.split(" +");
 			
-			// only do anything if the player is standing on the required ground material
-			if (config.REQUIRE_GROUND_MATERIAL && getBlockMaterialStandingOn(searchedPlayer) != config.GROUND_MATERIAL) return;
+			// parse the material, if it does not exist, then just skip to the next line
+			if (split.length < 1) continue;
+			Material checkMaterial = Material.getMaterial(split[0]);	
+			if (checkMaterial == null) continue;
 			
-			String searcherMessage = "Search found: ";
-			BookMeta bookMeta = (BookMeta) itemStackInHand.getItemMeta();
-			
-			List<String> lines = getAllLinesInBook(bookMeta);
-			
-			for (String line : lines) {
-				getLogger().info(line);
-				
-				// now parse the book data and check inventories
-				
-				line = line.trim().toUpperCase();
-				
-				String[] split = line.split(" +");
-				
-				if (split.length < 1) continue;
-				
-				Material checkMaterial = Material.getMaterial(split[0]);
-				
-				if (checkMaterial == null) continue;
-				
-				searcherMessage += ", " + getItemCountInInventory(searchedPlayer, checkMaterial) +  " " + checkMaterial.name();
+			// parse the data value. If it exists, raise the "useData" flag
+			byte checkData = 0;
+			boolean useData = false;
+			if (split.length >= 2) {
+				try {
+					checkData = Byte.parseByte(split[1]);
+					useData = true;
+				} catch (NumberFormatException e) {
+					useData = false;
+				}
 			}
 			
-			searcherPlayer.sendMessage("§7[" + getDescription().getName() + "] " + searcherMessage);
+			// check inventory
+			String materialName = checkMaterial.name() + (useData ? (":" + checkData) : "");
+			searchedMessage += ", " + materialName;
+			int itemCount = getItemCountInInventory(searchedPlayer, checkMaterial, checkData, useData);
+			if (itemCount != 0) {
+				totalFoundItemTypes++;
+				searcherMessage += ", " + itemCount +  " " + materialName;
+			}
 		}
+		
+		if (totalFoundItemTypes == 0) {
+			searcherMessage = "nothing";
+		}
+		searcherPlayer.sendMessage("§7[" + getDescription().getName() + "] " + "Scanned " + searchedPlayer.getName() + ", found: " + searcherMessage);
+		searchedPlayer.sendMessage("§7[" + getDescription().getName() + "] " + searcherPlayer.getName() + " scanned you for: " + searchedMessage);
 	}
+	
+	// ----------------------------------------------------------------------------------------------------------------
 	
 	private List<String> getAllLinesInBook(BookMeta bookMeta) {
 		List<String> result = new ArrayList<>();
@@ -110,7 +127,8 @@ public class BookScan extends JavaPlugin implements Listener {
 	}
 	
 	// returns the number of items in the player's inventory that match the given Material
-	private int getItemCountInInventory(Player player, Material material) {
+	// if the useData flag is raised, then also match by the provided data value
+	private int getItemCountInInventory(Player player, Material material, byte data, boolean useData) {
 		int count = 0;
 		
 		for (ItemStack itemStack : player.getInventory().getContents()) {
@@ -118,7 +136,9 @@ public class BookScan extends JavaPlugin implements Listener {
 			if (itemStack == null) continue;
 			
 			if (itemStack.getType() == material) {
-				count += itemStack.getAmount();
+				if (!useData || itemStack.getData().getData() == data) {
+					count += itemStack.getAmount();
+				}
 			}
 		}
 		
